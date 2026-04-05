@@ -1,52 +1,107 @@
+const puppeteer = require("puppeteer");
 const axios = require("axios");
-const cheerio = require("cheerio");
 
 const URL = "https://www.ajio.com/search/?text=gold%20coin";
-const TARGET_PRICE = 15000; // set your target
+const TARGET_PRICE = 33000;
+
+// ✅ Use env variables (IMPORTANT for Render)
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const CHAT_ID = process.env.CHAT_ID;
 
+let lastAlertPrice = null;
+
+// ✅ Filter only 2gm 24K 999 coins
 function isValidGold(title) {
   title = title.toLowerCase();
 
   return (
     (title.includes("24k") || title.includes("999")) &&
     title.includes("gold") &&
-    title.includes("2 g") &&
+    title.includes("2 gm") &&
+    !title.includes("995") &&
     !title.includes("silver") &&
-    !title.includes("plated")
+    !title.includes("plated") &&
+    !title.includes("+")
   );
 }
 
-async function getGoldPrice() {
-  const res = await axios.get(URL, {
-    headers: { "User-Agent": "Mozilla/5.0" },
-  });
-
-  const $ = cheerio.load(res.data);
-  let matched = [];
-
-  $(".nameCls").each((i, el) => {
-    const title = $(el).text();
-
-    if (isValidGold(title)) {
-      const priceText = $(el)
-        .closest(".item")
-        .find(".price")
-        .text()
-        .replace(/[₹,]/g, "");
-
-      const price = parseInt(priceText);
-
-      if (!isNaN(price)) {
-        matched.push({ title, price });
-      }
-    }
-  });
-
-  return matched;
+// ✅ Extract Offer Price
+function extractOfferPrice(text) {
+  const match = text.match(/Offer Price:\s*₹\s*([\d,]+)/i);
+  return match ? parseInt(match[1].replace(/,/g, "")) : null;
 }
 
+// ✅ Smart scroll (limited)
+async function autoScroll(page) {
+  let previousHeight = 0;
+
+  for (let i = 0; i < 10; i++) {
+    const currentHeight = await page.evaluate(
+      () => document.body.scrollHeight
+    );
+
+    if (currentHeight === previousHeight) break;
+
+    previousHeight = currentHeight;
+
+    await page.evaluate(() => {
+      window.scrollTo(0, document.body.scrollHeight);
+    });
+
+    await new Promise((r) => setTimeout(r, 2000));
+  }
+}
+
+// ✅ Scrape products
+async function getGoldProducts() {
+  const browser = await puppeteer.launch({
+    headless: "new",
+    args: ["--no-sandbox", "--disable-setuid-sandbox"],
+  });
+
+  const page = await browser.newPage();
+
+  await page.setUserAgent(
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"
+  );
+
+  await page.goto(URL, { waitUntil: "domcontentloaded" });
+
+  await new Promise((r) => setTimeout(r, 3000));
+
+  await autoScroll(page);
+
+  await new Promise((r) => setTimeout(r, 2000));
+
+  const texts = await page.evaluate(() => {
+    const all = document.querySelectorAll("div");
+    let result = [];
+
+    all.forEach((el) => {
+      const text = el.innerText || "";
+      if (text.toLowerCase().includes("gold")) {
+        result.push(text);
+      }
+    });
+
+    return result;
+  });
+
+  await browser.close();
+
+  const products = [];
+
+  for (const text of texts) {
+    const price = extractOfferPrice(text);
+    if (price) {
+      products.push({ title: text, price });
+    }
+  }
+
+  return products;
+}
+
+// ✅ Telegram alert
 async function sendAlert(message) {
   const url = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`;
 
@@ -56,23 +111,48 @@ async function sendAlert(message) {
   });
 }
 
+// ✅ Main logic
 async function main() {
-  const products = await getGoldPrice();
+  try {
+    console.log("⏳ Checking price...");
 
-  if (products.length === 0) {
-    console.log("No matching products found");
-    return;
-  }
+    const products = await getGoldProducts();
+    const filtered = products.filter((p) => isValidGold(p.title));
 
-  const best = products.sort((a, b) => a.price - b.price)[0];
+    if (filtered.length === 0) {
+      console.log("❌ No matching coins");
+      return;
+    }
 
-  console.log("Best:", best);
+    const best = filtered.sort((a, b) => a.price - b.price)[0];
 
-  if (best.price <= TARGET_PRICE) {
-    await sendAlert(
-      `🔥 Price Drop!\n${best.title}\n₹${best.price}`
-    );
+    console.log("✅ Best:", best.price);
+
+    if (
+      best.price <= TARGET_PRICE &&
+      best.price !== lastAlertPrice
+    ) {
+      lastAlertPrice = best.price;
+
+      await sendAlert(
+        `🔥 PRICE DROP!\n\n💰 ₹${best.price}\n\n${best.title}`
+      );
+
+      console.log("✅ Alert sent");
+    } else {
+      console.log("ℹ️ No alert");
+    }
+  } catch (err) {
+    console.error("❌ Error:", err);
   }
 }
 
-main();
+// ✅ Render-friendly loop
+(async () => {
+  while (true) {
+    await main();
+
+    console.log("⏱ Waiting 30 mins...");
+    await new Promise((r) => setTimeout(r, 1800000)); // 30 min
+  }
+})();
