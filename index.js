@@ -4,7 +4,6 @@ const axios = require("axios");
 const URL = "https://www.ajio.com/search/?text=gold%20coin";
 const TARGET_PRICE = 330000;
 
-// ✅ CONFIGURABLE WEIGHTS (ORDER MATTERS)
 const WEIGHTS = ["0.5 gm", "1 gm", "2 gm"];
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
@@ -12,47 +11,54 @@ const CHAT_IDS = process.env.CHAT_IDS.split(",");
 
 // ✅ Extract weight
 function getWeight(title) {
-  title = title.toLowerCase();
-  return WEIGHTS.find((w) => title.includes(w)) || null;
+  const t = title.toLowerCase();
+  return WEIGHTS.find((w) => t.includes(w)) || null;
 }
 
-// ✅ Filter valid gold
+// ✅ Clean title (important fix)
+function cleanTitle(text) {
+  return text
+    .replace(/\s+/g, " ")
+    .replace(/Offer Price:.*$/i, "") // remove price part
+    .trim();
+}
+
+// ✅ Extract OFFER PRICE (robust)
+function extractOfferPrice(text) {
+  const match = text.match(
+    /(Offer Price|Deal Price|Price):\s*₹\s*([\d,]+)/i
+  );
+  return match ? parseInt(match[2].replace(/,/g, "")) : null;
+}
+
+// ✅ Filter
 function isValidGold(title) {
-  title = title.toLowerCase();
+  const t = title.toLowerCase();
 
   return (
-    (title.includes("24k") || title.includes("999")) &&
-    title.includes("gold") &&
+    (t.includes("24k") || t.includes("999")) &&
+    t.includes("gold") &&
     getWeight(title) &&
-    !title.includes("995") &&
-    !title.includes("silver") &&
-    !title.includes("plated") &&
-    !title.includes("+")
+    !t.includes("995") &&
+    !t.includes("silver") &&
+    !t.includes("plated") &&
+    !t.includes("+")
   );
 }
 
-// ✅ Delay helper
-function delay(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
+// ✅ Delay
+const delay = (ms) => new Promise((res) => setTimeout(res, ms));
 
 // ✅ Scroll
 async function autoScroll(page) {
-  let previousHeight = 0;
+  let prev = 0;
 
   for (let i = 0; i < 10; i++) {
-    const currentHeight = await page.evaluate(
-      () => document.body.scrollHeight
-    );
+    const curr = await page.evaluate(() => document.body.scrollHeight);
+    if (curr === prev) break;
 
-    if (currentHeight === previousHeight) break;
-
-    previousHeight = currentHeight;
-
-    await page.evaluate(() => {
-      window.scrollTo(0, document.body.scrollHeight);
-    });
-
+    prev = curr;
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
     await delay(1500);
   }
 }
@@ -61,11 +67,7 @@ async function autoScroll(page) {
 async function getGoldProducts() {
   const browser = await puppeteer.launch({
     headless: "new",
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-blink-features=AutomationControlled",
-    ],
+    args: ["--no-sandbox", "--disable-setuid-sandbox"],
   });
 
   try {
@@ -74,10 +76,6 @@ async function getGoldProducts() {
     await page.setUserAgent(
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"
     );
-
-    await page.setExtraHTTPHeaders({
-      "accept-language": "en-US,en;q=0.9",
-    });
 
     await page.goto(URL, {
       waitUntil: "domcontentloaded",
@@ -88,30 +86,40 @@ async function getGoldProducts() {
     await autoScroll(page);
     await delay(2000);
 
-    const texts = await page.evaluate(() => {
-      const all = document.querySelectorAll("div");
-      let result = [];
+    const items = await page.evaluate(() => {
+      const anchors = document.querySelectorAll("a[href*='/p/']");
+      const results = [];
 
-      all.forEach((el) => {
+      anchors.forEach((el) => {
         const text = el.innerText || "";
-        if (text.toLowerCase().includes("gold")) {
-          result.push(text);
-        }
+        const link = el.href;
+
+        if (!text.toLowerCase().includes("gold")) return;
+
+        results.push({
+          rawText: text,
+          link: link.startsWith("http")
+            ? link
+            : "https://www.ajio.com" + link,
+        });
       });
 
-      return result;
+      return results;
     });
 
     const products = [];
 
-    for (const text of texts) {
-      const priceMatch = text.match(/Offer Price:\s*₹\s*([\d,]+)/i);
-      if (priceMatch) {
-        products.push({
-          title: text.replace(/\n/g, " ").trim(),
-          price: parseInt(priceMatch[1].replace(/,/g, "")),
-        });
-      }
+    for (const item of items) {
+      const price = extractOfferPrice(item.rawText);
+      if (!price) continue;
+
+      const title = cleanTitle(item.rawText);
+
+      products.push({
+        title,
+        price,
+        link: item.link,
+      });
     }
 
     return products;
@@ -120,7 +128,7 @@ async function getGoldProducts() {
   }
 }
 
-// ✅ Format message nicely
+// ✅ Format message (clean + premium)
 function formatMessage(bestByWeight) {
   let msg = "🔥 *GOLD PRICE ALERT* 🔥\n\n";
 
@@ -130,10 +138,11 @@ function formatMessage(bestByWeight) {
     if (deal) {
       msg += `🏆 *${weight.toUpperCase()}*\n`;
       msg += `💰 ₹${deal.price.toLocaleString("en-IN")}\n`;
-      msg += `📦 ${deal.title.slice(0, 120)}...\n\n`;
+      msg += `📦 ${deal.title.slice(0, 90)}\n`;
+      msg += `🔗 [Buy Now](${deal.link})\n\n`;
     } else {
       msg += `🏆 *${weight.toUpperCase()}*\n`;
-      msg += `❌ No deal found\n\n`;
+      msg += `❌ No deal available\n\n`;
     }
   }
 
@@ -152,6 +161,7 @@ async function sendAlert(message) {
         chat_id: chatId,
         text: message,
         parse_mode: "Markdown",
+        disable_web_page_preview: false,
       })
     )
   );
@@ -173,33 +183,27 @@ async function main() {
       return;
     }
 
-    // ✅ Find cheapest per weight
+    // ✅ Cheapest per weight
     const bestByWeight = {};
 
-    for (const product of filtered) {
-      const weight = getWeight(product.title);
+    for (const p of filtered) {
+      const weight = getWeight(p.title);
       if (!weight) continue;
 
-      if (
-        !bestByWeight[weight] ||
-        product.price < bestByWeight[weight].price
-      ) {
-        bestByWeight[weight] = product;
+      if (!bestByWeight[weight] || p.price < bestByWeight[weight].price) {
+        bestByWeight[weight] = p;
       }
     }
 
-    // ✅ Apply target price filter
-    for (const weight of WEIGHTS) {
-      if (
-        bestByWeight[weight] &&
-        bestByWeight[weight].price > TARGET_PRICE
-      ) {
-        delete bestByWeight[weight];
+    // ✅ Apply target filter
+    for (const w of WEIGHTS) {
+      if (bestByWeight[w] && bestByWeight[w].price > TARGET_PRICE) {
+        delete bestByWeight[w];
       }
     }
 
     if (Object.keys(bestByWeight).length === 0) {
-      console.log("ℹ️ No deals under target price");
+      console.log("ℹ️ No deals under target");
       return;
     }
 
@@ -214,5 +218,5 @@ async function main() {
   }
 }
 
-// ✅ Run once
+// ✅ Run
 main();
