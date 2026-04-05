@@ -7,8 +7,6 @@ const TARGET_PRICE = 33000;
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const CHAT_ID = process.env.CHAT_ID;
 
-let lastAlertPrice = null;
-
 // ✅ Filter only 2gm 24K 999 coins
 function isValidGold(title) {
   title = title.toLowerCase();
@@ -30,6 +28,11 @@ function extractOfferPrice(text) {
   return match ? parseInt(match[1].replace(/,/g, "")) : null;
 }
 
+// ✅ Delay helper (CI-safe)
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 // ✅ Scroll
 async function autoScroll(page) {
   let previousHeight = 0;
@@ -47,7 +50,7 @@ async function autoScroll(page) {
       window.scrollTo(0, document.body.scrollHeight);
     });
 
-    await new Promise((r) => setTimeout(r, 1500));
+    await delay(1500);
   }
 }
 
@@ -62,52 +65,59 @@ async function getGoldProducts() {
     ],
   });
 
-  const page = await browser.newPage();
+  try {
+    const page = await browser.newPage();
 
-  // ✅ Avoid 403 (IMPORTANT)
-  await page.setUserAgent(
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"
-  );
+    // ✅ Anti-403 setup
+    await page.setUserAgent(
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"
+    );
 
-  await page.setExtraHTTPHeaders({
-    "accept-language": "en-US,en;q=0.9",
-  });
-
-  await page.goto(URL, {
-    waitUntil: "domcontentloaded",
-    timeout: 60000,
-  });
-
-  await page.waitForTimeout(3000);
-
-  await autoScroll(page);
-
-  const texts = await page.evaluate(() => {
-    const all = document.querySelectorAll("div");
-    let result = [];
-
-    all.forEach((el) => {
-      const text = el.innerText || "";
-      if (text.toLowerCase().includes("gold")) {
-        result.push(text);
-      }
+    await page.setExtraHTTPHeaders({
+      "accept-language": "en-US,en;q=0.9",
     });
 
-    return result;
-  });
+    await page.goto(URL, {
+      waitUntil: "domcontentloaded",
+      timeout: 60000,
+    });
 
-  await browser.close();
+    await delay(3000); // ✅ SAFE (replaces waitForTimeout)
 
-  const products = [];
+    await autoScroll(page);
 
-  for (const text of texts) {
-    const price = extractOfferPrice(text);
-    if (price) {
-      products.push({ title: text, price });
+    await delay(2000);
+
+    const texts = await page.evaluate(() => {
+      const all = document.querySelectorAll("div");
+      let result = [];
+
+      all.forEach((el) => {
+        const text = el.innerText || "";
+        if (text.toLowerCase().includes("gold")) {
+          result.push(text);
+        }
+      });
+
+      return result;
+    });
+
+    const products = [];
+
+    for (const text of texts) {
+      const price = text.match(/Offer Price:\s*₹\s*([\d,]+)/i);
+      if (price) {
+        products.push({
+          title: text,
+          price: parseInt(price[1].replace(/,/g, "")),
+        });
+      }
     }
-  }
 
-  return products;
+    return products;
+  } finally {
+    await browser.close();
+  }
 }
 
 // ✅ Telegram
@@ -120,7 +130,7 @@ async function sendAlert(message) {
   });
 }
 
-// ✅ Main (run once)
+// ✅ Main
 async function main() {
   try {
     console.log("⏳ Checking price...");
@@ -135,7 +145,7 @@ async function main() {
 
     const best = filtered.sort((a, b) => a.price - b.price)[0];
 
-    console.log("✅ Best:", best.price);
+    console.log("✅ Best price:", best.price);
 
     if (best.price <= TARGET_PRICE) {
       await sendAlert(
@@ -147,9 +157,9 @@ async function main() {
     }
   } catch (err) {
     console.error("❌ Error:", err.message);
-    process.exit(1); // fail job if needed
+    process.exit(1);
   }
 }
 
-// ✅ Run once and exit
+// ✅ Run once (IMPORTANT for GitHub Actions)
 main();
