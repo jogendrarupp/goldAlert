@@ -2,8 +2,7 @@ name: Gold Price Tracker
 
 on:
   schedule:
-    - cron: "* * * * *"   # every 30 minutes
-  workflow_dispatch:        # manual run button
+    - cron: "0/5 * * * *"   # every 30 minutes
 
 jobs:
   run-script:
