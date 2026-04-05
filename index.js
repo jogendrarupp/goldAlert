@@ -2,7 +2,7 @@ const puppeteer = require("puppeteer");
 const axios = require("axios");
 
 const URL = "https://www.ajio.com/search/?text=gold%20coin";
-const TARGET_PRICE = 33000;
+const TARGET_PRICE = 330000;
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const CHAT_IDS = process.env.CHAT_IDS.split(",");
@@ -142,6 +142,7 @@ async function main() {
     console.log("⏳ Checking price...");
 
     const products = await getGoldProducts();
+
     const filtered = products.filter((p) => isValidGold(p.title));
 
     if (filtered.length === 0) {

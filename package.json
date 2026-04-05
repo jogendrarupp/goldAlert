@@ -10,7 +10,19 @@
     "node": ">=18"
   },
   "dependencies": {
-    "puppeteer": "^22.7.1",
-    "axios": "^1.6.0"
-  }
+    "axios": "^1.14.0",
+    "puppeteer": "^22.15.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jogendrarupp/goldAlert.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/jogendrarupp/goldAlert/issues"
+  },
+  "homepage": "https://github.com/jogendrarupp/goldAlert#readme"
 }
