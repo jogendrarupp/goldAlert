@@ -2,15 +2,21 @@ name: Gold Price Tracker
 
 on:
   schedule:
-    - cron: "*/5 * * * *"   # every 30 minutes
+    - cron: "*/5 * * * *"   # Runs every 5 minutes reliably
+  workflow_dispatch:         # Allows you to click "Run workflow" in the GitHub UI
 
 jobs:
   run-script:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v3
+      - name: Checkout repository
+        uses: actions/checkout@v4 # Upgraded to v4 (latest)
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20' # Good practice to specify the Node version
 
       - name: Install dependencies
         run: npm install
