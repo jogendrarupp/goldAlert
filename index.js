@@ -5,7 +5,7 @@ const URL = "https://www.ajio.com/search/?text=gold%20coin";
 const TARGET_PRICE = 33000;
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
-const CHAT_ID = process.env.CHAT_ID;
+const CHAT_IDS = process.env.CHAT_IDS.split(",");
 
 // ✅ Filter only 2gm 24K 999 coins
 function isValidGold(title) {
@@ -124,10 +124,16 @@ async function getGoldProducts() {
 async function sendAlert(message) {
   const url = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`;
 
-  await axios.post(url, {
-    chat_id: CHAT_ID,
-    text: message,
-  });
+  await Promise.all(
+    CHAT_IDS.map((chatId) =>
+      axios.post(url, {
+        chat_id: chatId,
+        text: message,
+      })
+    )
+  );
+
+  console.log("✅ Sent to all users");
 }
 
 // ✅ Main
