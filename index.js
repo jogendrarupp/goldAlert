@@ -9,21 +9,36 @@ const WEIGHTS = ["0.5 gm", "1 gm", "2 gm"];
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const CHAT_IDS = process.env.CHAT_IDS.split(",");
 
-// ✅ Extract weight
+// ✅ FIXED: Robust weight detection
 function getWeight(title) {
   const t = title.toLowerCase();
-  return WEIGHTS.find((w) => t.includes(w)) || null;
+
+  if (t.includes("0.5")) return "0.5 gm";
+
+  if (
+    t.includes("1 gm") ||
+    t.includes("1g") ||
+    t.includes("1 gram")
+  ) return "1 gm";
+
+  if (
+    t.includes("2 gm") ||
+    t.includes("2g") ||
+    t.includes("2 gram")
+  ) return "2 gm";
+
+  return null;
 }
 
-// ✅ Clean title (important fix)
+// ✅ Clean title
 function cleanTitle(text) {
   return text
     .replace(/\s+/g, " ")
-    .replace(/Offer Price:.*$/i, "") // remove price part
+    .replace(/(Offer Price|Deal Price|Price):.*$/i, "")
     .trim();
 }
 
-// ✅ Extract OFFER PRICE (robust)
+// ✅ Extract OFFER PRICE
 function extractOfferPrice(text) {
   const match = text.match(
     /(Offer Price|Deal Price|Price):\s*₹\s*([\d,]+)/i
@@ -132,7 +147,7 @@ async function getGoldProducts() {
   }
 }
 
-// ✅ Format message (clean + premium)
+// ✅ Format message
 function formatMessage(bestByWeight) {
   let msg = "🔥 *GOLD PRICE ALERT* 🔥\n\n";
 
@@ -187,7 +202,6 @@ async function main() {
       return;
     }
 
-    // ✅ Cheapest per weight
     const bestByWeight = {};
 
     for (const p of filtered) {
@@ -199,7 +213,6 @@ async function main() {
       }
     }
 
-    // ✅ Apply target filter
     for (const w of WEIGHTS) {
       if (bestByWeight[w] && bestByWeight[w].price > TARGET_PRICE) {
         delete bestByWeight[w];
