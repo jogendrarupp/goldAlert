@@ -1,0 +1,23 @@
+name: Gold Price Tracker
+
+on:
+  schedule:
+    - cron: "* * * * *"   # every 30 minutes
+  workflow_dispatch:        # manual run button
+
+jobs:
+  run-script:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run script
+        run: node index.js
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_IDS: ${{ secrets.CHAT_IDS }}
