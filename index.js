@@ -4,17 +4,26 @@ const axios = require("axios");
 const URL = "https://www.ajio.com/search/?text=gold%20coin";
 const TARGET_PRICE = 330000;
 
+// ✅ CONFIGURABLE WEIGHTS (ORDER MATTERS)
+const WEIGHTS = ["0.5 gm", "1 gm", "2 gm"];
+
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const CHAT_IDS = process.env.CHAT_IDS.split(",");
 
-// ✅ Filter only 2gm 24K 999 coins
+// ✅ Extract weight
+function getWeight(title) {
+  title = title.toLowerCase();
+  return WEIGHTS.find((w) => title.includes(w)) || null;
+}
+
+// ✅ Filter valid gold
 function isValidGold(title) {
   title = title.toLowerCase();
 
   return (
     (title.includes("24k") || title.includes("999")) &&
     title.includes("gold") &&
-    title.includes("2 gm") &&
+    getWeight(title) &&
     !title.includes("995") &&
     !title.includes("silver") &&
     !title.includes("plated") &&
@@ -22,13 +31,7 @@ function isValidGold(title) {
   );
 }
 
-// ✅ Extract Offer Price
-function extractOfferPrice(text) {
-  const match = text.match(/Offer Price:\s*₹\s*([\d,]+)/i);
-  return match ? parseInt(match[1].replace(/,/g, "")) : null;
-}
-
-// ✅ Delay helper (CI-safe)
+// ✅ Delay helper
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -68,7 +71,6 @@ async function getGoldProducts() {
   try {
     const page = await browser.newPage();
 
-    // ✅ Anti-403 setup
     await page.setUserAgent(
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"
     );
@@ -82,10 +84,8 @@ async function getGoldProducts() {
       timeout: 60000,
     });
 
-    await delay(3000); // ✅ SAFE (replaces waitForTimeout)
-
+    await delay(3000);
     await autoScroll(page);
-
     await delay(2000);
 
     const texts = await page.evaluate(() => {
@@ -105,11 +105,11 @@ async function getGoldProducts() {
     const products = [];
 
     for (const text of texts) {
-      const price = text.match(/Offer Price:\s*₹\s*([\d,]+)/i);
-      if (price) {
+      const priceMatch = text.match(/Offer Price:\s*₹\s*([\d,]+)/i);
+      if (priceMatch) {
         products.push({
-          title: text,
-          price: parseInt(price[1].replace(/,/g, "")),
+          title: text.replace(/\n/g, " ").trim(),
+          price: parseInt(priceMatch[1].replace(/,/g, "")),
         });
       }
     }
@@ -118,6 +118,28 @@ async function getGoldProducts() {
   } finally {
     await browser.close();
   }
+}
+
+// ✅ Format message nicely
+function formatMessage(bestByWeight) {
+  let msg = "🔥 *GOLD PRICE ALERT* 🔥\n\n";
+
+  for (const weight of WEIGHTS) {
+    const deal = bestByWeight[weight];
+
+    if (deal) {
+      msg += `🏆 *${weight.toUpperCase()}*\n`;
+      msg += `💰 ₹${deal.price.toLocaleString("en-IN")}\n`;
+      msg += `📦 ${deal.title.slice(0, 120)}...\n\n`;
+    } else {
+      msg += `🏆 *${weight.toUpperCase()}*\n`;
+      msg += `❌ No deal found\n\n`;
+    }
+  }
+
+  msg += "━━━━━━━━━━━━━━━";
+
+  return msg;
 }
 
 // ✅ Telegram
@@ -129,11 +151,12 @@ async function sendAlert(message) {
       axios.post(url, {
         chat_id: chatId,
         text: message,
+        parse_mode: "Markdown",
       })
     )
   );
 
-  console.log("✅ Sent to all users");
+  console.log("✅ Alert sent");
 }
 
 // ✅ Main
@@ -150,23 +173,46 @@ async function main() {
       return;
     }
 
-    const best = filtered.sort((a, b) => a.price - b.price)[0];
+    // ✅ Find cheapest per weight
+    const bestByWeight = {};
 
-    console.log("✅ Best price:", best.price);
+    for (const product of filtered) {
+      const weight = getWeight(product.title);
+      if (!weight) continue;
 
-    if (best.price <= TARGET_PRICE) {
-      await sendAlert(
-        `🔥 PRICE DROP!\n\n💰 ₹${best.price}\n\n${best.title}`
-      );
-      console.log("✅ Alert sent");
-    } else {
-      console.log("ℹ️ No alert");
+      if (
+        !bestByWeight[weight] ||
+        product.price < bestByWeight[weight].price
+      ) {
+        bestByWeight[weight] = product;
+      }
     }
+
+    // ✅ Apply target price filter
+    for (const weight of WEIGHTS) {
+      if (
+        bestByWeight[weight] &&
+        bestByWeight[weight].price > TARGET_PRICE
+      ) {
+        delete bestByWeight[weight];
+      }
+    }
+
+    if (Object.keys(bestByWeight).length === 0) {
+      console.log("ℹ️ No deals under target price");
+      return;
+    }
+
+    const message = formatMessage(bestByWeight);
+
+    await sendAlert(message);
+
+    console.log("✅ Done");
   } catch (err) {
     console.error("❌ Error:", err.message);
     process.exit(1);
   }
 }
 
-// ✅ Run once (IMPORTANT for GitHub Actions)
+// ✅ Run once
 main();
