@@ -2,7 +2,7 @@ name: Gold Price Tracker
 
 on:
   schedule:
-    - cron: "0/5 * * * *"   # every 30 minutes
+    - cron: "*/5 * * * *"   # every 30 minutes
 
 jobs:
   run-script:
