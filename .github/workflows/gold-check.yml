@@ -1,24 +1,19 @@
-name: Gold Price Check
+name: Gold Price Tracker
 
 on:
   schedule:
-    - cron: "0 */3 * * *"  # every 3 hours
-  workflow_dispatch:
+    - cron: "*/30 * * * *"   # every 30 minutes
+  workflow_dispatch:        # manual run button
 
 jobs:
-  check:
+  run-script:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v3
 
-      - name: Install Node
-        uses: actions/setup-node@v3
-        with:
-          node-version: "20"
-
-      - name: Install deps
+      - name: Install dependencies
         run: npm install
 
       - name: Run script

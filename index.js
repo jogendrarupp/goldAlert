@@ -4,7 +4,6 @@ const axios = require("axios");
 const URL = "https://www.ajio.com/search/?text=gold%20coin";
 const TARGET_PRICE = 33000;
 
-// ✅ Use env variables (IMPORTANT for Render)
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const CHAT_ID = process.env.CHAT_ID;
 
@@ -31,7 +30,7 @@ function extractOfferPrice(text) {
   return match ? parseInt(match[1].replace(/,/g, "")) : null;
 }
 
-// ✅ Smart scroll (limited)
+// ✅ Scroll
 async function autoScroll(page) {
   let previousHeight = 0;
 
@@ -48,30 +47,40 @@ async function autoScroll(page) {
       window.scrollTo(0, document.body.scrollHeight);
     });
 
-    await new Promise((r) => setTimeout(r, 2000));
+    await new Promise((r) => setTimeout(r, 1500));
   }
 }
 
-// ✅ Scrape products
+// ✅ Scrape
 async function getGoldProducts() {
   const browser = await puppeteer.launch({
     headless: "new",
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-blink-features=AutomationControlled",
+    ],
   });
 
   const page = await browser.newPage();
 
+  // ✅ Avoid 403 (IMPORTANT)
   await page.setUserAgent(
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"
   );
 
-  await page.goto(URL, { waitUntil: "domcontentloaded" });
+  await page.setExtraHTTPHeaders({
+    "accept-language": "en-US,en;q=0.9",
+  });
 
-  await new Promise((r) => setTimeout(r, 3000));
+  await page.goto(URL, {
+    waitUntil: "domcontentloaded",
+    timeout: 60000,
+  });
+
+  await page.waitForTimeout(3000);
 
   await autoScroll(page);
-
-  await new Promise((r) => setTimeout(r, 2000));
 
   const texts = await page.evaluate(() => {
     const all = document.querySelectorAll("div");
@@ -101,7 +110,7 @@ async function getGoldProducts() {
   return products;
 }
 
-// ✅ Telegram alert
+// ✅ Telegram
 async function sendAlert(message) {
   const url = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`;
 
@@ -111,7 +120,7 @@ async function sendAlert(message) {
   });
 }
 
-// ✅ Main logic
+// ✅ Main (run once)
 async function main() {
   try {
     console.log("⏳ Checking price...");
@@ -128,31 +137,19 @@ async function main() {
 
     console.log("✅ Best:", best.price);
 
-    if (
-      best.price <= TARGET_PRICE &&
-      best.price !== lastAlertPrice
-    ) {
-      lastAlertPrice = best.price;
-
+    if (best.price <= TARGET_PRICE) {
       await sendAlert(
         `🔥 PRICE DROP!\n\n💰 ₹${best.price}\n\n${best.title}`
       );
-
       console.log("✅ Alert sent");
     } else {
       console.log("ℹ️ No alert");
     }
   } catch (err) {
-    console.error("❌ Error:", err);
+    console.error("❌ Error:", err.message);
+    process.exit(1); // fail job if needed
   }
 }
 
-// ✅ Render-friendly loop
-(async () => {
-  while (true) {
-    await main();
-
-    console.log("⏱ Waiting 30 mins...");
-    await new Promise((r) => setTimeout(r, 1800000)); // 30 min
-  }
-})();
+// ✅ Run once and exit
+main();
